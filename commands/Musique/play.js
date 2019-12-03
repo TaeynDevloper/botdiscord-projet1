@@ -13,71 +13,34 @@ class Play extends Command {
     });
   }
 
-  async run(message, args) {
-    const { voiceChannel } = message.member;
-    if (!voiceChannel)
-      return message.channel.send(
-        "Vous devez être dans un salon vocal pour utiliser cette commande !"
-      );
+	async run(msg) {
+		if (!msg.member) {
+			await msg.guild.members.fetch(msg.author.id).catch(() => {
+				throw 'I am sorry, but Discord did not tell me the information I need, so I do not know what voice channel are you connected to...';
+			});
+		}
 
-    const serverQueue = message.client.queue.get(message.guild.id);
-    const songInfo = await ytdl.getInfo(args[0]);
-    const song = {
-      id: songInfo.video_id,
-      title: Util.escapeMarkdown(songInfo.title),
-      url: songInfo.video_url
-    };
+		const voiceChannel = msg.member.voice.channel;
+		if (!voiceChannel) throw 'You are not connected in a voice channel.';
+		if (msg.guild.music.playing) {
+			const sneyraVoiceChannel = msg.guild.music.voice.channel;
+			if (voiceChannel.id === sneyraVoiceChannel.id) throw 'Turn on your volume! I am playing music there!';
+			throw 'I am sorry, but I am playing music in another channel, perhaps try later or ask nicely to the people who came first to join them!';
+		}
+		this.resolvePermissions(msg, voiceChannel);
 
-    if (serverQueue) {
-      serverQueue.songs.push(song);
-      return message.channel.send(
-        `✅ **${song.title}** est ajoutée à la queue !`
-      );
-    }
+		await msg.guild.music.join(voiceChannel);
+		return msg.sendMessage(`Successfully joined the voice channel ${voiceChannel}`);
+	}
 
-    const queueConstruct = {
-      textChannel: message.channel,
-      voiceChannel,
-      connection: null,
-      songs: [],
-      volume: 1,
-      playing: true
-    };
-    message.client.queue.set(message.guild.id, queueConstruct);
-    queueConstruct.songs.push(song);
+	resolvePermissions(msg, voiceChannel) {
+		if (voiceChannel.full) throw 'I cannot join your voice channel, it\'s full... kick somebody with the boot or make room for me!';
 
-    const play = async song => {
-      const queue = message.client.queue.get(message.guild.id);
-      if (!song) {
-        queue.voiceChannel.leave();
-        message.client.queue.delete(message.guild.id);
-        return;
-      }
+		const permissions = voiceChannel.permissionsFor(msg.guild.me);
+		if (!permissions.has(FLAGS.CONNECT)) throw 'I do not have enough permissions to connect to your voice channel. I am missing the CONNECT permission.';
+		if (!permissions.has(FLAGS.SPEAK)) throw 'I can connect... but not speak. Please turn on this permission so I can emit music.';
+	}
 
-      const dispatcher = queue.connection
-        .playOpusStream(await ytdlDiscord(song.url), { passes: 3 })
-        .on("end", reason => {
-          if (reason === "Récupération trop lente !")
-            console.log("La musique s'est arrêtée !");
-          else console.log(reason);
-          queue.songs.shift();
-          play(queue.songs[0]);
-        })
-        .on("error", error => console.error(error));
-      dispatcher.setVolumeLogarithmic(queue.volume / 5);
-      queue.textChannel.send(`🎶 Commence à jouer: **${song.title}**`);
-    };
-
-    try {
-      const connection = await voiceChannel.join();
-      queueConstruct.connection = connection;
-      play(queueConstruct.songs[0]);
-    } catch (error) {
-      console.error(`Je n'ai pas pu rejoindre le salon: ${error}`);
-      message.client.queue.delete(message.guild.id);
-      await voiceChannel.leave();
-    }
-  }
-}
+};
 
 module.exports = Play;
